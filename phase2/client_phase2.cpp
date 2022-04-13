@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 
 using namespace std;
 
@@ -31,6 +32,29 @@ int main( int argc, char const* argv[] ){
         return 0;
     }
     
+    // Get files in Source Directory.
+    DIR* sdir = opendir(argv[2]);
+    if (sdir == NULL){
+        printf("Some error accessing Source directory of client\n");
+        return 0;
+    }
+    struct dirent* sfile;
+    char** sfileNames;
+    sfileNames = (char **)malloc(sizeof(char *) * 255);
+    {
+        int i = 0;
+        while(sfile = readdir(sdir)){
+            if(sfile->d_type == DT_REG){
+                sfileNames[i] = (char *)malloc(sizeof(char)*255);
+                sprintf(sfileNames[i],"%s\n",sfile->d_name);
+                i++;
+            }
+        }
+    }
+
+
+
+
     size_t buffer_size = 255;
     char* buffer;
     buffer = (char *)malloc(sizeof(char) * buffer_size);
