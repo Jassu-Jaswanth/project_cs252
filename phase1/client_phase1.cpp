@@ -233,10 +233,21 @@ int main( int argc, char const* argv[] ){
                     }
                 } else {
                     //TODO: read data;
-                    if(recv(fd,buffer,sizeof(char)*buffer_size,0) == -1){
+                    int rv = recv(fd,buffer,sizeof(char)*buffer_size,0);
+                    if(rv == -1){
                         if(errno == EWOULDBLOCK || errno == EAGAIN){
-                            printf("recv failed");
+                            printf("Timed out");
                         }
+                    }
+                    else if (rv == 0){
+                        printf("connection failed. Try to reconnect");
+                        // Just set the connected of this file descriptor to false
+                        // On the next cycle it tries to connect to it
+                        int i = find_fd_index(fd, clients_con, client_num);
+                        connected[i] = false;
+                        FD_CLR(clients_con[i],&readfds);
+                        close(fd);
+                        clients_con[i] = 0;
                     }
                     else{
                         printf("%s\n",buffer);
