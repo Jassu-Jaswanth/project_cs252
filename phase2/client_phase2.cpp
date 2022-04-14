@@ -8,8 +8,33 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <pthread.h>
+#include <map>
 
 using namespace std;
+
+struct req_args{
+    int maxfd;
+    int fileCount;
+    char** fileNames;
+    fd_set rfds;
+};
+
+void* send_requirement_ins(void *vargp);
+
+int fileLength( FILE *f ){
+    int pos;
+    int end;
+
+    // seeks the beginning of the file to the end and counts
+    // it and returns into variable end
+    pos = ftell(f);
+    fseek (f, 0, SEEK_END);
+    end = ftell(f);
+    fseek (f, pos, SEEK_SET);
+
+    return end;
+}
 
 int SetNonBlocking(int sd){
   int curflags = fcntl(sd, F_GETFL, 0);
@@ -24,6 +49,28 @@ int find_fd_index(int fd, int* fds, int total_fds){
     }
     return -1;
 }
+int find_id_index(int id,int* client_ids,int client_num){
+    for(int i = 0; i < client_num; i++){
+        if(client_ids[i] == id){
+            return i;
+        }
+    }
+    return -1;
+}
+
+int send_file(int fd, char* filename){
+    FILE* fp = fopen(filename,"rb");
+    char* buf = (char*)malloc(sizeof(char)*255);
+    int fs = fileLength(fp);
+    do{
+        fread(buf,sizeof(char),255,fp);
+        int sn = send(fd,buf,255,0);
+        fs -= sn;
+    } while (fs > 0);
+    return 0;
+}
+
+
 int main( int argc, char const* argv[] ){
 
     // Minimum required arguments
@@ -40,24 +87,26 @@ int main( int argc, char const* argv[] ){
     }
     struct dirent* sfile;
     char** sfileNames;
+    int sfileCount;
     sfileNames = (char **)malloc(sizeof(char *) * 255);
     {
         int i = 0;
         while(sfile = readdir(sdir)){
             if(sfile->d_type == DT_REG){
                 sfileNames[i] = (char *)malloc(sizeof(char)*255);
-                sprintf(sfileNames[i],"%s\n",sfile->d_name);
+                sprintf(sfileNames[i],"%s",sfile->d_name);
                 i++;
             }
         }
+        sfileCount = i+1;
     }
 
+    
 
 
-
-    size_t buffer_size = 255;
-    char* buffer;
-    buffer = (char *)malloc(sizeof(char) * buffer_size);
+    size_t buffer_size = 256*256;
+    // char* buffer;
+    // buffer = (char *)malloc(sizeof(char) * buffer_size);
 
     int id;                     // Local unique id of host
     int unique_id;              // Network provided unique id of host
@@ -136,11 +185,12 @@ int main( int argc, char const* argv[] ){
     char** fileNames;
     fileNames = (char **)malloc(sizeof(char *) * fileCount);
     for (int i = 0; i<fileCount; i++){
-        buffer_size = 255;
         fileNames[i] = (char *)malloc(sizeof(char)*255);
         fscanf(config_file,"%s\n",fileNames[i]);
         printf("%s\n",fileNames[i]);
     }
+
+
 
     int* client_uids = (int *)malloc(sizeof(int) * client_num);
     
@@ -161,12 +211,22 @@ int main( int argc, char const* argv[] ){
             maxfd = listen_sock;
         }
 
+
+    int *uid_file = (int*)malloc(sizeof(char) * fileCount);
+    int *uid_cnt = (int*)malloc(sizeof(char) * fileCount);
+    memset(uid_file,0,fileCount);
+    memset(uid_file,0,fileCount);
+
     bool *connected = (bool *)malloc(sizeof(bool)*client_num);
     bool *uid_read = (bool *)malloc(sizeof(bool)*client_num);
     memset(connected,false,client_num);   
     memset(uid_read,false,client_num);
+    int rd = buffer_size;
+    bool isConnected = true;
+    bool req_sent = false;
+    // just accept a conn
     while (true){
-        // puts("peer running");
+        // puts("Still listening\n");
         // sleep(1);
         // Try connecting if not connected already or if there is a breakage of connection
         // Though it might fail to notice dead connections in phase-1 coz of no file or data transfer
@@ -191,8 +251,9 @@ int main( int argc, char const* argv[] ){
                     maxfd = clients_con[i];
                 }
                 connected[i] = true;
-                sprintf(buffer,"Connected to %d with unique-ID %d on port %d",id,unique_id,host_port);
-                if(send(clients_con[i],buffer,buffer_size*sizeof(char),0) == -1){
+                char msg[50];
+                sprintf(msg,"i#Connected to %d with unique-ID %d on port %d#",id,unique_id,host_port);
+                if(send(clients_con[i],msg,strlen(msg),0) == -1){
                     if(errno == EWOULDBLOCK || errno == EAGAIN){
                         printf("Sending failed\n");
                     }
@@ -213,7 +274,7 @@ int main( int argc, char const* argv[] ){
         // Also let's accecpt if there are any connections at any port
         // else check if there is any data to be read
         // also need to get what we want.
-        for (int fd = 1; fd<maxfd+1; fd++){
+        for (int fd = 0; fd<maxfd+1; fd++){
             
             if (FD_ISSET(fd,&readfds_cpy)){
                 if( fd == listen_sock){
@@ -247,9 +308,9 @@ int main( int argc, char const* argv[] ){
                                     return 0;
                                 }
                                 
-                                
-                                sprintf(buffer,"Connected to %d with unique-ID %d on port %d",id,unique_id,host_port);
-                                send(clients_con[i],&unique_id,sizeof(char)*buffer_size,0);
+                                char msg[50];
+                                sprintf(msg,"i#Connected to %d with unique-ID %d on port %d#",id,unique_id,host_port);
+                                send(clients_con[i],msg,strlen(msg),0);
                                 
                                 break;
                             }
@@ -257,29 +318,136 @@ int main( int argc, char const* argv[] ){
                     }
                 } else {
                     //TODO: read data;
-                    int rv = recv(fd,buffer,sizeof(char)*buffer_size,0);
+                    char *buffer = (char*)malloc(sizeof(char) * buffer_size);
+                    int rv = recv(fd,buffer,buffer_size,0);
                     if(rv == -1){
                         if(errno == EWOULDBLOCK || errno == EAGAIN){
                             printf("Timed out");
                         }
                     }
                     else if (rv == 0){
-                        printf("connection failed. Try to reconnect");
+                        // printf("connection failed. Try to reconnect");
                         // Just set the connected of this file descriptor to false
                         // On the next cycle it tries to connect to it
-                        int i = find_fd_index(fd, clients_con, client_num);
-                        connected[i] = false;
-                        FD_CLR(clients_con[i],&readfds);
-                        close(fd);
-                        clients_con[i] = 0;
+                        // int i = find_fd_index(fd, clients_con, client_num);
+                        // connected[i] = false;
+                        // FD_CLR(clients_con[i],&readfds);
+                        // close(fd);
+                        // clients_con[i] = 0;
                     }
                     else{
-                        printf("%s\n",buffer);
+                        // Should also handle other requests for search depth one
+                        char ch = buffer[0];
+                        switch (ch){
+                            case 'i':
+                                {
+                                char* msg_buf = (char*)malloc(sizeof(char) * (rv-2));
+                                int tmp_id;
+                                int tmp_uid;
+                                int tmp_port;
+                                int tmp_int;
+                                //Connected to %d with unique-ID %d on port %d
+                                for(int j = 0; buffer[j+2] != '#'; j++){
+                                    msg_buf[j] = buffer[j+2];
+                                }
+                                sscanf(msg_buf,"Connected to %d with unique-ID %d on port %d",&tmp_id,&tmp_uid,&tmp_port);
+                                tmp_int = find_id_index(tmp_id,client_ids,client_num);
+                                client_uids[tmp_int] = tmp_uid;
+                                uid_read[tmp_int] = true;
+                                printf("%s\n",msg_buf);
+                                }
+                                break;
+                            
+                            case 'a':
+                                {
+                                printf("yup i recieved your request\n");
+                                int i;
+                                char* reply = (char *)malloc(sizeof(char) * buffer_size);
+                                sprintf(reply,"f#");
+                                char filename[256*356];
+                                int namelen = 0;
+                                for(i = 0; i<rv-2; i++){
+                                    if (buffer[i+2] == '#'){
+                                        filename[namelen] = '\0';
+                                        for(int j = 0; j < sfileCount; j++){
+                                            if(strcmp(filename,sfileNames[j]) == 0){
+                                                strcat(reply,"#1");
+                                            } else {
+                                                strcat(reply,"#0");
+                                            }
+
+                                        }
+                                        namelen = 0;
+                                    } else {
+                                        filename[namelen] = buffer[i+2];
+                                        namelen++;
+                                    }
+                                    i++;
+                                }
+                                strcat(reply,"#\0");
+                                send(fd,reply,strlen(reply),0);
+                                }
+
+                                break;
+
+                            case 'f':
+                                printf("yay\n");
+                                {
+                                for(int j = 0; j<rv-2 && j<fileCount; j++){
+                                    if(buffer[j + 2] == '1'){
+                                        int cuid = find_fd_index(fd,clients_con,maxfd);
+                                        if(client_uids[cuid] < uid_file[j]){
+                                            uid_file[j] = client_uids[cuid];
+                                        }
+                                        uid_cnt[j]++;
+                                    } else if (buffer[j+2] == '0'){
+                                        uid_cnt[j]++;
+                                    }else{
+                                        // do nothing;
+                                    }
+                                    
+                                }
+                                }
+                                break;
+
+                            default:
+                                break;
+                        }
                     }
                 }
             }
         }
-    }
+        isConnected = true;
+        for (int i = 0; i < client_num; i++){
+            isConnected = isConnected && uid_read[i];
+        }
+        if (isConnected && !req_sent){
+            FD_CLR(listen_sock,&readfds);   // Just to make sure that it's not read/written during searching or file transfer
+                                            // NOTE: listen_sock still listens just that we don't accept until phase4 ig.            
+            char* req_msg = (char*)malloc(sizeof(char)*buffer_size);
+            sprintf(req_msg,"a#");
+            for(int j = 0; j<fileCount; j++){
+                sprintf(req_msg,"%s%s",req_msg,fileNames[j]);
+            }
+            strcat(req_msg,"#");
+            for(int j = 0; j<client_num; j++){
+                send(clients_con[j],req_msg,strlen(req_msg),0);
+            }
+            printf("yes sent the requests\n");
+            req_sent = true;
+        }
+
+        for(int j = 0; j < fileCount; j++){
+            if(uid_cnt[j] == client_num){
+                if(uid_file[j] == 0){
+                    printf("Found %s at 0 with MD5 0 at depth 0\n",fileNames[j]);
+                } else {
+                    printf("Found %s at %d with MD5 0 at depth 1\n",fileNames[j],uid_file[j]);
+                }
+                
+            }
+        }
+    }  
 
     return 0;
 }
