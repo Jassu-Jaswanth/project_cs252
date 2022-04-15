@@ -3,3 +3,5 @@
 bin
 config
 client_dirs
+Makefile
+
