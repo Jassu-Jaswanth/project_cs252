@@ -187,7 +187,7 @@ int main( int argc, char const* argv[] ){
     for (int i = 0; i<fileCount; i++){
         fileNames[i] = (char *)malloc(sizeof(char)*255);
         fscanf(config_file,"%s\n",fileNames[i]);
-        printf("%s\n",fileNames[i]);
+        //printf("%s\n",fileNames[i]);
     }
 
 
@@ -214,8 +214,10 @@ int main( int argc, char const* argv[] ){
 
     int *uid_file = (int*)malloc(sizeof(char) * fileCount);
     int *uid_cnt = (int*)malloc(sizeof(char) * fileCount);
-    memset(uid_file,0,fileCount);
-    memset(uid_file,0,fileCount);
+    for(int i = 0; i<fileCount; i++){
+        uid_cnt[i] = 0;
+        uid_file[i] = 0;
+    }
 
     bool *connected = (bool *)malloc(sizeof(bool)*client_num);
     bool *uid_read = (bool *)malloc(sizeof(bool)*client_num);
@@ -357,7 +359,7 @@ int main( int argc, char const* argv[] ){
                                 tmp_int = find_id_index(tmp_id,client_ids,client_num);
                                 client_uids[tmp_int] = tmp_uid;
                                 uid_read[tmp_int] = true;
-                                printf("%s\n",msg_buf);
+                                // printf("%s\n",msg_buf);
                                 }
                                 break;
                             
@@ -393,7 +395,7 @@ int main( int argc, char const* argv[] ){
                                     }
                                 }
                                 strcat(reply,"##\0");
-                                printf("%s\n",reply);
+                                // memset(reply+strlen(reply),(int)'#',buffer_size-strlen(reply));
                                 send(fd,reply,strlen(reply),0);
                                 }
 
@@ -417,13 +419,9 @@ int main( int argc, char const* argv[] ){
                                         uid_cnt[j]++;
                                     }else if(buffer[j+2] == '#'){
                                         if( j != rv-3 && buffer[j+3] == '#'){
-
-                                        }else{
-                                            //TODO: Needs to be printed again;
+                                            break;
                                         }
-                                        // do nothing;
                                     }
-                                    
                                 }
                                 }
                                 break;
@@ -458,10 +456,11 @@ int main( int argc, char const* argv[] ){
 
         for(int j = 0; j < fileCount && !file_found[j]; j++){
             if(uid_cnt[j] == client_num){
-                if(uid_file[j] == 0){
-                    printf("Found %s at 0 with MD5 0 at depth 0\n",fileNames[j]);
-                } else {
+                if(uid_file[j] != 0){
                     printf("Found %s at %d with MD5 0 at depth 1\n",fileNames[j],uid_file[j]);
+                    
+                } else {
+                    printf("Found %s at 0 with MD5 0 at depth 0\n",fileNames[j]);
                 }
                 file_found[j] = true;
             }
